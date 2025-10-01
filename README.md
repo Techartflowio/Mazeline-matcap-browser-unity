@@ -66,17 +66,7 @@ MatCap (Material Capture)은 3D 오브젝트에 실시간으로 복잡한 재질
 
 ## 📦 Installation
 
-### 방법 1: Unity Package Manager (Git URL)
-
-1. Unity 에디터를 엽니다
-2. `Window` > `Package Manager`로 이동
-3. `+` 버튼 클릭 > `Add package from git URL...` 선택
-4. 다음 URL 입력:
-   ```
-   https://github.com/YOUR_USERNAME/Mazeline-matcap-browser-unity.git
-   ```
-
-### 방법 2: 직접 설치
+### 방법 : 직접 설치 필요
 
 1. 이 레포지토리를 클론하거나 다운로드합니다
 2. `Assets/Editors/Matcap Browser` 폴더를 Unity 프로젝트의 `Assets` 폴더에 복사합니다
