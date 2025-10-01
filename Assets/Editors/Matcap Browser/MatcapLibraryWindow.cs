@@ -1,3 +1,42 @@
+/*
+ * ============================================================================
+ * Matcap Library Window - Unity Editor Extension
+ * ============================================================================
+ * 
+ * [개요]
+ * Unity 에디터에서 MatCap 텍스처를 검색, 미리보기, 다운로드할 수 있는
+ * 전문 브라우저 윈도우입니다.
+ * 
+ * [주요 기능]
+ * - GitHub 레포지토리에서 600개 이상의 MatCap 텍스처 자동 로드
+ * - 실시간 검색 및 필터링
+ * - 그리드/리스트 뷰 모드 전환
+ * - 1024px 고정 해상도 다운로드
+ * - 스마트 캐싱 시스템 (7일 유효기간)
+ * - 자동 Material 생성
+ * 
+ * [사용 방법]
+ * Window > Matcap Library 메뉴에서 윈도우를 엽니다.
+ * 
+ * [API 사용 예제]
+ * // 윈도우 열기
+ * MatcapLibraryWindow.ShowWindow();
+ * 
+ * // 캐시 정보 확인
+ * var window = EditorWindow.GetWindow<MatcapLibraryWindow>();
+ * window.ShowCacheInfo();
+ * 
+ * // 캐시 삭제
+ * window.ClearCache();
+ * 
+ * [소스]
+ * MatCap 텍스처 소스: https://github.com/nidorx/matcaps
+ * 
+ * [라이선스]
+ * MIT License
+ * ============================================================================
+ */
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -8,103 +47,253 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Networking;
 
-namespace SGE.Editor.MatcapLibrary
+namespace ML.Editor
 {
+    /// <summary>
+    /// MatCap 라이브러리 브라우저 에디터 윈도우
+    /// GitHub에서 MatCap 텍스처를 검색하고 다운로드할 수 있는 전문 도구
+    /// </summary>
     public class MatcapLibraryWindow : EditorWindow
     {
-        // GitHub URLs - Using API and raw content
-        private const string GITHUB_API_BASE = "https://api.github.com/repos/nidorx/matcaps/contents/";
-        private const string GITHUB_RAW_BASE = "https://raw.githubusercontent.com/nidorx/matcaps/master/";
-        private const string GITHUB_PAGE_URL = "https://github.com/nidorx/matcaps/tree/master/preview";
+        #region GitHub 연결 설정
         
-        // Cache settings
-        private const string CACHE_DIR_NAME = "MatcapCache";
-        private const string CACHE_INDEX_FILE = "cache_index.json";
-        private const int CACHE_EXPIRY_DAYS = 7; // Cache expires after 7 days
-        public static string CacheDirectory => Path.Combine(Application.dataPath, "..", "Library", CACHE_DIR_NAME);
-        public static string CacheIndexPath => Path.Combine(CacheDirectory, CACHE_INDEX_FILE);
+        /// <summary>GitHub API 기본 URL</summary>
+        private const string GitHubApiBase = "https://api.github.com/repos/nidorx/matcaps/contents/";
         
-
+        /// <summary>GitHub Raw 컨텐츠 기본 URL</summary>
+        private const string GitHubRawBase = "https://raw.githubusercontent.com/nidorx/matcaps/master/";
         
-        // UI Properties
-        private Vector2 scrollPosition;
-        private List<MatcapItem> matcapItems = new List<MatcapItem>();
-        private Dictionary<string, Texture2D> previewCache = new Dictionary<string, Texture2D>();
-        public string downloadPath = "Assets/Matcaps";
-        private const int FIXED_RESOLUTION = 1024; // Always download at 1024px
-        private bool isLoading = false;
-        private string statusMessage = "";
-        private int itemsPerRow = 4;
-        private float thumbnailSize = 100f;
-        private string searchFilter = "";
-        private List<MatcapItem> filteredItems = new List<MatcapItem>();
-        private int loadedPreviewCount = 0;
+        /// <summary>GitHub 페이지 URL (스크래핑용)</summary>
+        private const string GitHubPageUrl = "https://github.com/nidorx/matcaps/tree/master/preview";
         
-        // UI Style Constants
-        private const float HEADER_HEIGHT = 60f;
-        private const float TOOLBAR_HEIGHT = 35f;
-        private const float SEARCH_BAR_HEIGHT = 25f;
-        private const float STATUS_BAR_HEIGHT = 22f;
-        private const float SPACING = 8f;
-        private const float BORDER_WIDTH = 1f;
+        #endregion
         
-        // UI State
-        private bool showFilters = false;
-        private ViewMode currentViewMode = ViewMode.Grid;
-        private SortMode currentSortMode = SortMode.Name;
-        private bool sortAscending = true;
-        private MatcapItem selectedItem = null;
-        private MatcapItem hoveredItem = null;
+        #region 캐시 설정
         
-        // Colors (Dark Theme)
-        private static readonly Color HEADER_COLOR = new Color(0.2f, 0.2f, 0.2f, 1f);
-        private static readonly Color TOOLBAR_COLOR = new Color(0.25f, 0.25f, 0.25f, 1f);
-        private static readonly Color BORDER_COLOR = new Color(0.1f, 0.1f, 0.1f, 1f);
-        private static readonly Color SELECTED_COLOR = new Color(0.3f, 0.5f, 0.9f, 0.8f);
-        private static readonly Color HOVER_COLOR = new Color(0.4f, 0.4f, 0.4f, 0.5f);
+        /// <summary>캐시 디렉토리 이름</summary>
+        private const string CacheDirName = "MatcapCache";
         
-        // Enums
+        /// <summary>캐시 인덱스 파일명</summary>
+        private const string CacheIndexFile = "cache_index.json";
+        
+        /// <summary>캐시 만료 기간 (일)</summary>
+        private const int CacheExpiryDays = 7;
+        
+        /// <summary>캐시 디렉토리 전체 경로</summary>
+        public static string CacheDirectory => Path.Combine(Application.dataPath, "..", "Library", CacheDirName);
+        
+        /// <summary>캐시 인덱스 파일 전체 경로</summary>
+        public static string CacheIndexPath => Path.Combine(CacheDirectory, CacheIndexFile);
+        
+        #endregion
+        
+        #region UI 속성
+        
+        /// <summary>스크롤 위치</summary>
+        private Vector2 __scrollPosition;
+        
+        /// <summary>MatCap 아이템 리스트</summary>
+        private List<MatcapItem> __matcapItems = new List<MatcapItem>();
+        
+        /// <summary>프리뷰 이미지 캐시 (메모리)</summary>
+        private Dictionary<string, Texture2D> __previewCache = new Dictionary<string, Texture2D>();
+        
+        /// <summary>다운로드 경로</summary>
+        public string DownloadPath = "Assets/Matcaps";
+        
+        /// <summary>고정 다운로드 해상도 (픽셀)</summary>
+        private const int FixedResolution = 1024;
+        
+        /// <summary>로딩 중 여부</summary>
+        private bool __isLoading = false;
+        
+        /// <summary>상태 메시지</summary>
+        private string __statusMessage = "";
+        
+        /// <summary>한 행당 아이템 개수</summary>
+        private int __itemsPerRow = 4;
+        
+        /// <summary>썸네일 크기</summary>
+        private float __thumbnailSize = 100f;
+        
+        /// <summary>검색 필터 텍스트</summary>
+        private string __searchFilter = "";
+        
+        /// <summary>필터링된 아이템 리스트</summary>
+        private List<MatcapItem> __filteredItems = new List<MatcapItem>();
+        
+        /// <summary>로드된 프리뷰 개수</summary>
+        private int __loadedPreviewCount = 0;
+        
+        #endregion
+        
+        #region UI 스타일 상수
+        
+        /// <summary>헤더 높이</summary>
+        private const float HeaderHeight = 60f;
+        
+        /// <summary>툴바 높이</summary>
+        private const float ToolbarHeight = 35f;
+        
+        /// <summary>검색바 높이</summary>
+        private const float SearchBarHeight = 25f;
+        
+        /// <summary>상태바 높이</summary>
+        private const float StatusBarHeight = 22f;
+        
+        /// <summary>요소 간 간격</summary>
+        private const float Spacing = 8f;
+        
+        /// <summary>테두리 두께</summary>
+        private const float BorderWidth = 1f;
+        
+        #endregion
+        
+        #region UI 상태
+        
+        /// <summary>필터 표시 여부</summary>
+        private bool _showFilters = false;
+        
+        /// <summary>현재 뷰 모드</summary>
+        private ViewMode _currentViewMode = ViewMode.Grid;
+        
+        /// <summary>현재 정렬 모드</summary>
+        private SortMode _currentSortMode = SortMode.Name;
+        
+        /// <summary>오름차순 정렬 여부</summary>
+        private bool _sortAscending = true;
+        
+        /// <summary>선택된 아이템</summary>
+        private MatcapItem _selectedItem = null;
+        
+        /// <summary>호버된 아이템</summary>
+        private MatcapItem _hoveredItem = null;
+        
+        #endregion
+        
+        #region 색상 테마 (다크)
+        
+        /// <summary>헤더 배경 색상</summary>
+        private static readonly Color HeaderColor = new Color(0.2f, 0.2f, 0.2f, 1f);
+        
+        /// <summary>툴바 배경 색상</summary>
+        private static readonly Color ToolbarColor = new Color(0.25f, 0.25f, 0.25f, 1f);
+        
+        /// <summary>테두리 색상</summary>
+        private static readonly Color BorderColor = new Color(0.1f, 0.1f, 0.1f, 1f);
+        
+        /// <summary>선택 항목 강조 색상</summary>
+        private static readonly Color SelectedColor = new Color(0.3f, 0.5f, 0.9f, 0.8f);
+        
+        /// <summary>호버 상태 색상</summary>
+        private static readonly Color HoverColor = new Color(0.4f, 0.4f, 0.4f, 0.5f);
+        
+        #endregion
+        
+        #region 열거형
+        
+        /// <summary>뷰 모드</summary>
         private enum ViewMode { Grid, List }
+        
+        /// <summary>정렬 모드</summary>
         private enum SortMode { Name, Size, DateAdded, Downloaded }
         
-        // Coroutine management
-        private EditorCoroutine loadingCoroutine;
+        #endregion
         
-        // Cache management
-        public CacheIndex cacheIndex;
-        private bool cacheInitialized = false;
+        #region 코루틴 관리
         
+        /// <summary>로딩 코루틴</summary>
+        private EditorCoroutine __loadingCoroutine;
+        
+        #endregion
+        
+        #region 캐시 관리
+        
+        /// <summary>캐시 인덱스</summary>
+        public CacheIndex CacheIndex;
+        
+        /// <summary>캐시 초기화 완료 여부</summary>
+        private bool __cacheInitialized = false;
+        
+        #endregion
+        
+        #region 내부 클래스
+        
+        /// <summary>
+        /// MatCap 아이템 데이터 클래스
+        /// 개별 MatCap 텍스처의 정보와 상태를 저장합니다.
+        /// </summary>
         [Serializable]
         private class MatcapItem
         {
+            /// <summary>MatCap 이름 (확장자 제외)</summary>
             public string name;
+            
+            /// <summary>파일 이름 (확장자 포함)</summary>
             public string fileName;
+            
+            /// <summary>프리뷰 텍스처</summary>
             public Texture2D preview;
+            
+            /// <summary>다운로드 진행 중 여부</summary>
             public bool isDownloading;
+            
+            /// <summary>다운로드 완료 여부</summary>
             public bool isDownloaded;
         }
         
+        /// <summary>
+        /// 캐시 엔트리 클래스
+        /// 개별 캐시 파일의 정보를 저장합니다.
+        /// </summary>
         [Serializable]
         public class CacheEntry
         {
+            /// <summary>원본 파일 이름</summary>
             public string fileName;
+            
+            /// <summary>캐시 파일 이름</summary>
             public string cacheFileName;
-            public long cacheTime; // Unix timestamp
+            
+            /// <summary>캐시 생성 시간 (Unix 타임스탬프)</summary>
+            public long cacheTime;
+            
+            /// <summary>파일 크기 (바이트)</summary>
             public int fileSize;
+            
+            /// <summary>캐시 유효성 여부</summary>
             public bool isValid;
         }
         
+        /// <summary>
+        /// 캐시 인덱스 클래스
+        /// 전체 캐시 시스템의 인덱스를 관리합니다.
+        /// </summary>
         [Serializable]
         public class CacheIndex
         {
+            /// <summary>캐시 엔트리 목록</summary>
             public List<CacheEntry> entries = new List<CacheEntry>();
+            
+            /// <summary>마지막 업데이트 시간 (Unix 타임스탬프)</summary>
             public long lastUpdate;
             
+            /// <summary>
+            /// 파일 이름으로 캐시 엔트리 검색
+            /// </summary>
+            /// <param name="fileName">검색할 파일 이름</param>
+            /// <returns>캐시 엔트리 (없으면 null)</returns>
             public CacheEntry GetEntry(string fileName)
             {
                 return entries.FirstOrDefault(e => e.fileName == fileName);
             }
             
+            /// <summary>
+            /// 캐시 엔트리 추가 또는 업데이트
+            /// </summary>
+            /// <param name="fileName">원본 파일 이름</param>
+            /// <param name="cacheFileName">캐시 파일 이름</param>
+            /// <param name="fileSize">파일 크기</param>
             public void AddOrUpdateEntry(string fileName, string cacheFileName, int fileSize)
             {
                 var existing = GetEntry(fileName);
@@ -129,18 +318,33 @@ namespace SGE.Editor.MatcapLibrary
                 lastUpdate = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             }
             
+            /// <summary>
+            /// 캐시 엔트리 제거
+            /// </summary>
+            /// <param name="fileName">제거할 파일 이름</param>
             public void RemoveEntry(string fileName)
             {
                 entries.RemoveAll(e => e.fileName == fileName);
             }
             
+            /// <summary>
+            /// 만료된 캐시 엔트리 정리
+            /// </summary>
             public void CleanExpiredEntries()
             {
-                long expireTime = DateTimeOffset.UtcNow.AddDays(-CACHE_EXPIRY_DAYS).ToUnixTimeSeconds();
+                long expireTime = DateTimeOffset.UtcNow.AddDays(-CacheExpiryDays).ToUnixTimeSeconds();
                 entries.RemoveAll(e => e.cacheTime < expireTime);
             }
         }
         
+        #endregion
+        
+        #region Unity 메뉴 & 초기화
+        
+        /// <summary>
+        /// Unity 메뉴에서 MatCap Library 윈도우를 엽니다.
+        /// Window > Matcap Library 메뉴 항목으로 접근 가능합니다.
+        /// </summary>
         [MenuItem("Window/Matcap Library")]
         public static void ShowWindow()
         {
@@ -148,61 +352,67 @@ namespace SGE.Editor.MatcapLibrary
             window.minSize = new Vector2(500, 400);
         }
         
+        /// <summary>
+        /// 윈도우가 활성화될 때 호출됩니다.
+        /// 캐시를 초기화하고 MatCap 목록을 로드합니다.
+        /// </summary>
         private void OnEnable()
         {
             InitializeCache();
             LoadMatcapList();
         }
         
+        /// <summary>
+        /// 윈도우가 비활성화될 때 호출됩니다.
+        /// 실행 중인 코루틴을 중지하고 메모리를 정리합니다.
+        /// </summary>
         private void OnDisable()
         {
-            // Stop any running coroutines
-            if (loadingCoroutine != null)
+            if (_loadingCoroutine != null)
             {
-                EditorCoroutine.Stop(loadingCoroutine);
-                loadingCoroutine = null;
+                EditorCoroutine.Stop(_loadingCoroutine);
+                _loadingCoroutine = null;
             }
             
-            // Clear preview cache to free memory
-            foreach (var texture in previewCache.Values)
+            foreach (var texture in _previewCache.Values)
             {
                 if (texture != null)
                 {
                     DestroyImmediate(texture);
                 }
             }
-            previewCache.Clear();
+            _previewCache.Clear();
         }
         
+        /// <summary>
+        /// GUI를 그립니다. Unity 에디터 윈도우의 메인 렌더링 메서드입니다.
+        /// </summary>
         private void OnGUI()
         {
-            // Calculate layout areas
-            Rect headerRect = new Rect(0, 0, position.width, HEADER_HEIGHT);
-            Rect toolbarRect = new Rect(0, HEADER_HEIGHT, position.width, TOOLBAR_HEIGHT);
-            Rect searchRect = new Rect(0, HEADER_HEIGHT + TOOLBAR_HEIGHT, position.width, SEARCH_BAR_HEIGHT + SPACING);
-            Rect contentRect = new Rect(0, HEADER_HEIGHT + TOOLBAR_HEIGHT + SEARCH_BAR_HEIGHT + SPACING, 
-                                       position.width, position.height - HEADER_HEIGHT - TOOLBAR_HEIGHT - SEARCH_BAR_HEIGHT - STATUS_BAR_HEIGHT - SPACING * 2);
-            Rect statusRect = new Rect(0, position.height - STATUS_BAR_HEIGHT, position.width, STATUS_BAR_HEIGHT);
+            Rect headerRect = new Rect(0, 0, position.width, HeaderHeight);
+            Rect toolbarRect = new Rect(0, HeaderHeight, position.width, ToolbarHeight);
+            Rect searchRect = new Rect(0, HeaderHeight + ToolbarHeight, position.width, SearchBarHeight + Spacing);
+            Rect contentRect = new Rect(0, HeaderHeight + ToolbarHeight + SearchBarHeight + Spacing, 
+                                       position.width, position.height - HeaderHeight - ToolbarHeight - SearchBarHeight - StatusBarHeight - Spacing * 2);
+            Rect statusRect = new Rect(0, position.height - StatusBarHeight, position.width, StatusBarHeight);
             
-            // Draw main UI sections
             DrawProfessionalHeader(headerRect);
             DrawToolbar(toolbarRect);
             DrawAdvancedSearchBar(searchRect);
             
-            // Draw content area
             GUILayout.BeginArea(contentRect);
             {
-                if (isLoading)
+                if (_isLoading)
                 {
                     DrawEnhancedLoadingMessage();
                 }
-                else if (filteredItems.Count == 0 && matcapItems.Count == 0)
+                else if (_filteredItems.Count == 0 && _matcapItems.Count == 0)
                 {
                     DrawEnhancedEmptyMessage();
                 }
                 else
                 {
-                    if (currentViewMode == ViewMode.Grid)
+                    if (_currentViewMode == ViewMode.Grid)
                         DrawEnhancedMatcapGrid();
                     else
                         DrawMatcapList();
@@ -212,30 +422,36 @@ namespace SGE.Editor.MatcapLibrary
             
             DrawEnhancedStatusBar(statusRect);
             
-            // Handle events
             HandleEvents();
         }
         
+        #endregion
+        
+        #region UI 그리기 메서드
+        
+        /// <summary>
+        /// 전문적인 헤더를 그립니다.
+        /// 제목, 연결 상태, 설정 버튼 등을 포함합니다.
+        /// </summary>
+        /// <param name="rect">헤더 영역</param>
         private void DrawProfessionalHeader(Rect rect)
         {
-            // Background
-            EditorGUI.DrawRect(rect, HEADER_COLOR);
-            EditorGUI.DrawRect(new Rect(rect.x, rect.y + rect.height - BORDER_WIDTH, rect.width, BORDER_WIDTH), BORDER_COLOR);
+            EditorGUI.DrawRect(rect, HeaderColor);
+            EditorGUI.DrawRect(new Rect(rect.x, rect.y + rect.height - BorderWidth, rect.width, BorderWidth), BorderColor);
             
             GUILayout.BeginArea(rect);
             {
                 GUILayout.BeginHorizontal();
                 {
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                     
-                    // Icon and title
                     GUILayout.BeginVertical();
                     {
                         GUILayout.Space(8);
                         GUIStyle titleStyle = new GUIStyle(EditorStyles.boldLabel);
                         titleStyle.fontSize = 16;
                         titleStyle.normal.textColor = Color.white;
-                        GUILayout.Label("🎨 Matcap Library", titleStyle);
+                        GUILayout.Label("Matcap Library", titleStyle);
                         
                         GUIStyle subtitleStyle = new GUIStyle(EditorStyles.miniLabel);
                         subtitleStyle.normal.textColor = new Color(0.8f, 0.8f, 0.8f, 1f);
@@ -245,15 +461,14 @@ namespace SGE.Editor.MatcapLibrary
                     
                     GUILayout.FlexibleSpace();
                     
-                    // Header buttons
                     GUILayout.BeginVertical();
                     {
                         GUILayout.Space(12);
                         GUILayout.BeginHorizontal();
                         {
                             // Connection status indicator
-                            Color statusColor = isLoading ? Color.yellow : 
-                                               (matcapItems.Count > 0 ? Color.green : Color.red);
+                            Color statusColor = _isLoading ? Color.yellow : 
+                                               (_matcapItems.Count > 0 ? Color.green : Color.red);
                             GUI.color = statusColor;
                             GUILayout.Label("●", GUILayout.Width(12));
                             GUI.color = Color.white;
@@ -261,13 +476,12 @@ namespace SGE.Editor.MatcapLibrary
                             // Settings toggle
                             GUIStyle buttonStyle = new GUIStyle(EditorStyles.miniButton);
                             buttonStyle.normal.textColor = Color.white;
-                            if (GUILayout.Button("⚙", buttonStyle, GUILayout.Width(25), GUILayout.Height(20)))
+                            if (GUILayout.Button("Settings", buttonStyle, GUILayout.Width(60), GUILayout.Height(20)))
                             {
                                 MatcapLibrarySettings.ShowWindow(this);
                             }
                             
-                            // Help button
-                            if (GUILayout.Button("?", buttonStyle, GUILayout.Width(25), GUILayout.Height(20)))
+                            if (GUILayout.Button("Help", buttonStyle, GUILayout.Width(40), GUILayout.Height(20)))
                             {
                                 ShowHelp();
                             }
@@ -276,85 +490,89 @@ namespace SGE.Editor.MatcapLibrary
                     }
                     GUILayout.EndVertical();
                     
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                 }
                 GUILayout.EndHorizontal();
             }
             GUILayout.EndArea();
         }
         
+        /// <summary>
+        /// 툴바를 그립니다.
+        /// 뷰 모드 전환, 정렬 옵션, 빠른 작업 버튼들을 포함합니다.
+        /// </summary>
+        /// <param name="rect">툴바 영역</param>
         private void DrawToolbar(Rect rect)
         {
-            // Background
-            EditorGUI.DrawRect(rect, TOOLBAR_COLOR);
-            EditorGUI.DrawRect(new Rect(rect.x, rect.y + rect.height - BORDER_WIDTH, rect.width, BORDER_WIDTH), BORDER_COLOR);
+            EditorGUI.DrawRect(rect, ToolbarColor);
+            EditorGUI.DrawRect(new Rect(rect.x, rect.y + rect.height - BorderWidth, rect.width, BorderWidth), BorderColor);
             
             GUILayout.BeginArea(rect);
             {
                 GUILayout.BeginHorizontal();
                 {
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                     
                     // View mode buttons
                     GUIStyle toggleStyle = new GUIStyle(EditorStyles.miniButton);
                     toggleStyle.normal.textColor = Color.white;
                     
-                    GUI.color = currentViewMode == ViewMode.Grid ? SELECTED_COLOR : Color.white;
-                    if (GUILayout.Button("⊞", toggleStyle, GUILayout.Width(30), GUILayout.Height(25)))
+                    GUI.color = _currentViewMode == ViewMode.Grid ? SelectedColor : Color.white;
+                    if (GUILayout.Button("Grid", toggleStyle, GUILayout.Width(45), GUILayout.Height(25)))
                     {
-                        currentViewMode = ViewMode.Grid;
+                        __currentViewMode = ViewMode.Grid;
                     }
                     
-                    GUI.color = currentViewMode == ViewMode.List ? SELECTED_COLOR : Color.white;
-                    if (GUILayout.Button("☰", toggleStyle, GUILayout.Width(30), GUILayout.Height(25)))
+                    GUI.color = __currentViewMode == ViewMode.List ? SelectedColor : Color.white;
+                    if (GUILayout.Button("List", toggleStyle, GUILayout.Width(45), GUILayout.Height(25)))
                     {
-                        currentViewMode = ViewMode.List;
+                        __currentViewMode = ViewMode.List;
                     }
                     GUI.color = Color.white;
                     
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                     
                     // Sort options
                     GUILayout.Label("Sort:", EditorStyles.miniLabel, GUILayout.Width(30));
-                    SortMode newSortMode = (SortMode)EditorGUILayout.EnumPopup(currentSortMode, GUILayout.Width(80));
-                    if (newSortMode != currentSortMode)
+                    SortMode newSortMode = (SortMode)EditorGUILayout.EnumPopup(_currentSortMode, GUILayout.Width(80));
+                    if (newSortMode != _currentSortMode)
                     {
-                        currentSortMode = newSortMode;
+                        _currentSortMode = newSortMode;
                         SortMatcaps();
                     }
                     
                     // Sort direction
-                    string sortIcon = sortAscending ? "↑" : "↓";
+                    string sortIcon = _sortAscending ? "↑" : "↓";
                     if (GUILayout.Button(sortIcon, toggleStyle, GUILayout.Width(20), GUILayout.Height(25)))
                     {
-                        sortAscending = !sortAscending;
+                        _sortAscending = !_sortAscending;
                         SortMatcaps();
                     }
                     
                     GUILayout.FlexibleSpace();
                     
                     // Quick actions
-                    if (GUILayout.Button("🔄", toggleStyle, GUILayout.Width(30), GUILayout.Height(25)))
+                    if (GUILayout.Button("Refresh", toggleStyle, GUILayout.Width(55), GUILayout.Height(25)))
                     {
                         LoadMatcapList();
                     }
                     
-                    if (GUILayout.Button("🔗", toggleStyle, GUILayout.Width(30), GUILayout.Height(25)))
+                    if (GUILayout.Button("Test", toggleStyle, GUILayout.Width(40), GUILayout.Height(25)))
                     {
                         TestGitHubConnection();
                     }
                     
-                    if (GUILayout.Button("💾", toggleStyle, GUILayout.Width(30), GUILayout.Height(25)))
+                    if (GUILayout.Button("Cache", toggleStyle, GUILayout.Width(50), GUILayout.Height(25)))
                     {
                         ShowCacheInfo();
                     }
                     
-                    if (GUILayout.Button("⬇", toggleStyle, GUILayout.Width(30), GUILayout.Height(25)))
+                    if (GUILayout.Button("Download All", toggleStyle, GUILayout.Width(85), GUILayout.Height(25)))
                     {
                         DownloadAllMatcaps();
                     }
                     
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                 }
                 GUILayout.EndHorizontal();
             }
@@ -367,15 +585,15 @@ namespace SGE.Editor.MatcapLibrary
             
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Download Path:", GUILayout.Width(100));
-            downloadPath = EditorGUILayout.TextField(downloadPath);
+            DownloadPath = EditorGUILayout.TextField(DownloadPath);
             if (GUILayout.Button("Browse", GUILayout.Width(60)))
             {
-                string path = EditorUtility.SaveFolderPanel("Select Download Folder", downloadPath, "");
+                string path = EditorUtility.SaveFolderPanel("Select Download Folder", DownloadPath, "");
                 if (!string.IsNullOrEmpty(path))
                 {
                     if (path.StartsWith(Application.dataPath))
                     {
-                        downloadPath = "Assets" + path.Substring(Application.dataPath.Length);
+                        DownloadPath = "Assets" + path.Substring(Application.dataPath.Length);
                     }
                     else
                     {
@@ -393,7 +611,7 @@ namespace SGE.Editor.MatcapLibrary
             
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Thumbnail Size:", GUILayout.Width(100));
-            thumbnailSize = EditorGUILayout.Slider(thumbnailSize, 50, 200);
+            _thumbnailSize = EditorGUILayout.Slider(_thumbnailSize, 50, 200);
             EditorGUILayout.EndHorizontal();
             
             EditorGUILayout.BeginHorizontal();
@@ -422,63 +640,66 @@ namespace SGE.Editor.MatcapLibrary
             GUILayout.Space(5);
         }
         
+        /// <summary>
+        /// 고급 검색 바를 그립니다.
+        /// 검색 필드, 필터 토글, 썸네일 크기 조절 슬라이더를 포함합니다.
+        /// </summary>
+        /// <param name="rect">검색 바 영역</param>
         private void DrawAdvancedSearchBar(Rect rect)
         {
-            rect.y += SPACING / 2;
-            rect.height = SEARCH_BAR_HEIGHT;
+            rect.y += Spacing / 2;
+            rect.height = SearchBarHeight;
             
             GUILayout.BeginArea(rect);
             {
                 GUILayout.BeginHorizontal();
                 {
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                     
-                    // Search icon and field
-                    GUILayout.Label("🔍", GUILayout.Width(16));
+                    GUILayout.Label("Search:", GUILayout.Width(50));
                     
                     GUIStyle searchStyle = new GUIStyle(EditorStyles.textField);
                     searchStyle.margin = new RectOffset(2, 2, 2, 2);
                     
-                    string newSearch = GUILayout.TextField(searchFilter, searchStyle);
-                    if (newSearch != searchFilter)
+                    string newSearch = GUILayout.TextField(_searchFilter, searchStyle);
+                    if (newSearch != _searchFilter)
                     {
-                        searchFilter = newSearch;
+                        _searchFilter = newSearch;
                         FilterMatcaps();
                     }
                     
-                    // Clear button
-                    if (!string.IsNullOrEmpty(searchFilter))
+                    if (!string.IsNullOrEmpty(_searchFilter))
                     {
-                        if (GUILayout.Button("✕", EditorStyles.miniButton, GUILayout.Width(20)))
+                        if (GUILayout.Button("Clear", EditorStyles.miniButton, GUILayout.Width(40)))
                         {
-                            searchFilter = "";
+                            _searchFilter = "";
                             FilterMatcaps();
                         }
                     }
                     
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                     
                     // Filters toggle
                     GUIStyle filterStyle = new GUIStyle(EditorStyles.miniButton);
-                    if (showFilters)
+                    if (_showFilters)
                     {
                         filterStyle.normal.background = EditorStyles.miniButton.active.background;
                     }
                     
                     if (GUILayout.Button("Filters", filterStyle, GUILayout.Width(50)))
                     {
-                        showFilters = !showFilters;
+                        _showFilters = !_showFilters;
                     }
                     
                     // Thumbnail size slider
                     GUILayout.Label("Size:", EditorStyles.miniLabel, GUILayout.Width(30));
-                    float newSize = GUILayout.HorizontalSlider(thumbnailSize, 60, 200, GUILayout.Width(80));
-                    if (newSize != thumbnailSize)
+                    float newSize = GUILayout.HorizontalSlider(_thumbnailSize, 60, 200, GUILayout.Width(80));
+                    if (newSize != _thumbnailSize)
                     {
-                        thumbnailSize = newSize;
+                        _thumbnailSize = newSize;
                     }
                     
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                 }
                 GUILayout.EndHorizontal();
             }
@@ -490,14 +711,14 @@ namespace SGE.Editor.MatcapLibrary
             GUILayout.FlexibleSpace();
             EditorGUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
-            GUILayout.Label($"Loading matcaps... ({loadedPreviewCount}/{matcapItems.Count})", EditorStyles.boldLabel);
+            GUILayout.Label($"Loading matcaps... ({_loadedPreviewCount}/{_matcapItems.Count})", EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
             
             // Progress bar
             Rect rect = GUILayoutUtility.GetRect(300, 20);
             rect.x = (position.width - 300) / 2;
-            EditorGUI.ProgressBar(rect, matcapItems.Count > 0 ? (float)loadedPreviewCount / matcapItems.Count : 0, "Loading previews...");
+            EditorGUI.ProgressBar(rect, _matcapItems.Count > 0 ? (float)_loadedPreviewCount / _matcapItems.Count : 0, "Loading previews...");
             
             GUILayout.FlexibleSpace();
         }
@@ -519,23 +740,23 @@ namespace SGE.Editor.MatcapLibrary
             
             // Calculate content width before starting scroll view
             float contentWidth = position.width - 40; // Account for scroll bar and padding
-            float itemWidth = thumbnailSize + SPACING;
-            itemsPerRow = Mathf.Max(1, Mathf.FloorToInt(contentWidth / itemWidth));
+            float itemWidth = _thumbnailSize + Spacing;
+            _itemsPerRow = Mathf.Max(1, Mathf.FloorToInt(contentWidth / itemWidth));
             
-            scrollPosition = GUILayout.BeginScrollView(scrollPosition);
+            _scrollPosition = GUILayout.BeginScrollView(_scrollPosition);
             {
-                for (int i = 0; i < itemsToDisplay.Count; i += itemsPerRow)
+                for (int i = 0; i < itemsToDisplay.Count; i += _itemsPerRow)
                 {
                     GUILayout.BeginHorizontal();
                     {
-                        for (int j = 0; j < itemsPerRow && i + j < itemsToDisplay.Count; j++)
+                        for (int j = 0; j < _itemsPerRow && i + j < itemsToDisplay.Count; j++)
                         {
                             DrawEnhancedMatcapItem(itemsToDisplay[i + j]);
                         }
                         GUILayout.FlexibleSpace(); // Fill remaining space in row
                     }
                     GUILayout.EndHorizontal();
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                 }
                 
                 // Add some bottom padding
@@ -548,7 +769,7 @@ namespace SGE.Editor.MatcapLibrary
         {
             List<MatcapItem> itemsToDisplay = GetSortedAndFilteredItems();
             
-            scrollPosition = GUILayout.BeginScrollView(scrollPosition);
+            _scrollPosition = GUILayout.BeginScrollView(_scrollPosition);
             {
                 // List header
                 GUILayout.BeginHorizontal(EditorStyles.toolbar);
@@ -571,21 +792,21 @@ namespace SGE.Editor.MatcapLibrary
         
         private void DrawEnhancedMatcapItem(MatcapItem item)
         {
-            float itemSize = thumbnailSize;
+            float itemSize = _thumbnailSize;
             Rect itemRect = GUILayoutUtility.GetRect(itemSize, itemSize + 30);
             
             // Handle hover and selection
             bool isHovered = itemRect.Contains(Event.current.mousePosition);
-            bool isSelected = selectedItem == item;
+            bool isSelected = _selectedItem == item;
             
             if (isHovered)
             {
-                hoveredItem = item;
+                _hoveredItem = item;
             }
             
             // Background
-            Color bgColor = isSelected ? SELECTED_COLOR : 
-                           (isHovered ? HOVER_COLOR : Color.clear);
+            Color bgColor = isSelected ? SelectedColor : 
+                           (isHovered ? HoverColor : Color.clear);
             
             if (bgColor != Color.clear)
             {
@@ -659,7 +880,7 @@ namespace SGE.Editor.MatcapLibrary
             {
                 if (Event.current.button == 0) // Left click
                 {
-                    selectedItem = item;
+                    _selectedItem = item;
                     if (Event.current.clickCount == 2) // Double click
                     {
                         if (!item.isDownloading)
@@ -679,7 +900,7 @@ namespace SGE.Editor.MatcapLibrary
         
         private void DrawMatcapListItem(MatcapItem item, int index)
         {
-            bool isSelected = selectedItem == item;
+            bool isSelected = _selectedItem == item;
             
             GUIStyle rowStyle = new GUIStyle();
             if (index % 2 == 0)
@@ -694,7 +915,7 @@ namespace SGE.Editor.MatcapLibrary
             
             if (isSelected)
             {
-                GUI.color = SELECTED_COLOR;
+                GUI.color = SelectedColor;
             }
             
             GUILayout.BeginHorizontal(rowStyle, GUILayout.Height(30));
@@ -746,7 +967,7 @@ namespace SGE.Editor.MatcapLibrary
             if (Event.current.type == EventType.MouseDown && 
                 GUILayoutUtility.GetLastRect().Contains(Event.current.mousePosition))
             {
-                selectedItem = item;
+                _selectedItem = item;
                 Event.current.Use();
             }
         }
@@ -754,24 +975,24 @@ namespace SGE.Editor.MatcapLibrary
         private void DrawEnhancedStatusBar(Rect rect)
         {
             // Background
-            EditorGUI.DrawRect(rect, TOOLBAR_COLOR);
-            EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, BORDER_WIDTH), BORDER_COLOR);
+            EditorGUI.DrawRect(rect, ToolbarColor);
+            EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, BorderWidth), BorderColor);
             
             GUILayout.BeginArea(rect);
             {
                 GUILayout.BeginHorizontal();
                 {
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                     
                     // Stats
                     List<MatcapItem> displayItems = GetSortedAndFilteredItems();
-                    int downloadedCount = matcapItems.Count(m => m.isDownloaded);
-                    int downloadingCount = matcapItems.Count(m => m.isDownloading);
+                    int downloadedCount = _matcapItems.Count(m => m.isDownloaded);
+                    int downloadingCount = _matcapItems.Count(m => m.isDownloading);
                     
                     GUIStyle statsStyle = new GUIStyle(EditorStyles.miniLabel);
                     statsStyle.normal.textColor = new Color(0.8f, 0.8f, 0.8f, 1f);
                     
-                    GUILayout.Label($"Total: {matcapItems.Count}", statsStyle);
+                    GUILayout.Label($"Total: {_matcapItems.Count}", statsStyle);
                     GUILayout.Label("•", statsStyle, GUILayout.Width(10));
                     GUILayout.Label($"Showing: {displayItems.Count}", statsStyle);
                     GUILayout.Label("•", statsStyle, GUILayout.Width(10));
@@ -788,21 +1009,21 @@ namespace SGE.Editor.MatcapLibrary
                     GUILayout.FlexibleSpace();
                     
                     // Status message
-                    if (!string.IsNullOrEmpty(statusMessage))
+                    if (!string.IsNullOrEmpty(_statusMessage))
                     {
                         GUIStyle messageStyle = new GUIStyle(EditorStyles.miniLabel);
                         messageStyle.normal.textColor = Color.white;
-                        GUILayout.Label(statusMessage, messageStyle);
+                        GUILayout.Label(_statusMessage, messageStyle);
                     }
                     
                     // Selected item info
-                    if (selectedItem != null)
+                    if (_selectedItem != null)
                     {
                         GUILayout.Label("•", statsStyle, GUILayout.Width(10));
-                        GUILayout.Label($"Selected: {selectedItem.name}", statsStyle);
+                        GUILayout.Label($"Selected: {_selectedItem.name}", statsStyle);
                     }
                     
-                    GUILayout.Space(SPACING);
+                    GUILayout.Space(Spacing);
                 }
                 GUILayout.EndHorizontal();
             }
@@ -833,7 +1054,7 @@ namespace SGE.Editor.MatcapLibrary
             
             // Progress info
             GUIStyle progressStyle = new GUIStyle(EditorStyles.centeredGreyMiniLabel);
-            GUILayout.Label($"{loadedPreviewCount} of {matcapItems.Count} previews loaded", progressStyle);
+            GUILayout.Label($"{_loadedPreviewCount} of {_matcapItems.Count} previews loaded", progressStyle);
             
             GUILayout.Space(20);
             
@@ -841,7 +1062,7 @@ namespace SGE.Editor.MatcapLibrary
             Rect progressRect = GUILayoutUtility.GetRect(300, 20);
             progressRect.x = (position.width - 300) / 2;
             
-            float progress = matcapItems.Count > 0 ? (float)loadedPreviewCount / matcapItems.Count : 0;
+            float progress = _matcapItems.Count > 0 ? (float)_loadedPreviewCount / _matcapItems.Count : 0;
             EditorGUI.ProgressBar(progressRect, progress, $"{(progress * 100):F0}%");
             
             GUILayout.FlexibleSpace();
@@ -862,7 +1083,7 @@ namespace SGE.Editor.MatcapLibrary
             GUILayout.BeginHorizontal();
             {
                 GUILayout.FlexibleSpace();
-                GUILayout.Label("🎨", iconStyle);
+                GUILayout.Label("No Matcaps", iconStyle);
                 GUILayout.FlexibleSpace();
             }
             GUILayout.EndHorizontal();
@@ -888,7 +1109,7 @@ namespace SGE.Editor.MatcapLibrary
             GUILayout.BeginHorizontal();
             {
                 GUILayout.FlexibleSpace();
-                GUILayout.Label("Click the refresh button (🔄) in the toolbar to load matcaps", subMessageStyle);
+                GUILayout.Label("Click the Refresh button in the toolbar to load matcaps", subMessageStyle);
                 GUILayout.FlexibleSpace();
             }
             GUILayout.EndHorizontal();
@@ -896,22 +1117,25 @@ namespace SGE.Editor.MatcapLibrary
             GUILayout.FlexibleSpace();
         }
         
+        /// <summary>
+        /// GitHub에서 MatCap 목록을 로드합니다.
+        /// API와 페이지 스크래핑을 사용하여 사용 가능한 모든 MatCap을 검색합니다.
+        /// </summary>
         public void LoadMatcapList()
         {
-            if (loadingCoroutine != null)
+            if (_loadingCoroutine != null)
             {
-                EditorCoroutine.Stop(loadingCoroutine);
+                EditorCoroutine.Stop(_loadingCoroutine);
             }
             
-            isLoading = true;
-            loadedPreviewCount = 0;
-            statusMessage = "Loading matcap list...";
-            matcapItems.Clear();
-            filteredItems.Clear();
-            previewCache.Clear();
+            _isLoading = true;
+            _loadedPreviewCount = 0;
+            _statusMessage = "Loading matcap list...";
+            _matcapItems.Clear();
+            _filteredItems.Clear();
+            _previewCache.Clear();
             
-            // Try to load from GitHub first, fallback to predefined list
-            loadingCoroutine = EditorCoroutine.Start(LoadMatcapsCoroutine());
+            _loadingCoroutine = EditorCoroutine.Start(LoadMatcapsCoroutine());
         }
         
         private IEnumerator LoadMatcapsCoroutine()
@@ -921,20 +1145,20 @@ namespace SGE.Editor.MatcapLibrary
             // First try GitHub API to get directory contents
             yield return LoadFromGitHubAPI();
             
-            if (matcapItems.Count > 0)
+            if (_matcapItems.Count > 0)
             {
                 useLocalList = false;
-                Debug.Log($"Loaded {matcapItems.Count} matcaps from GitHub API");
+                Debug.Log($"Loaded {_matcapItems.Count} matcaps from GitHub API");
             }
             else
             {
                 // Fallback: Try scraping from GitHub page
                 yield return LoadFromGitHubPage();
                 
-                if (matcapItems.Count > 0)
+                if (_matcapItems.Count > 0)
                 {
                     useLocalList = false;
-                    Debug.Log($"Loaded {matcapItems.Count} matcaps from GitHub page scraping");
+                    Debug.Log($"Loaded {_matcapItems.Count} matcaps from GitHub page scraping");
                 }
             }
             
@@ -942,7 +1166,7 @@ namespace SGE.Editor.MatcapLibrary
             if (useLocalList)
             {
                 Debug.LogError("Failed to load matcaps: Both GitHub API and page scraping failed");
-                statusMessage = "❌ Network error: Unable to connect to GitHub. Please check your internet connection.";
+                _statusMessage = "Network error: Unable to connect to GitHub. Please check your internet connection.";
                 
                 // Show helpful message to user
                 if (EditorUtility.DisplayDialog("Network Error", 
@@ -962,21 +1186,21 @@ namespace SGE.Editor.MatcapLibrary
             FilterMatcaps();
             
             // Load previews
-            foreach (var item in matcapItems)
+            foreach (var item in _matcapItems)
             {
                 EditorCoroutine.Start(LoadPreviewCoroutine(item));
             }
             
-            statusMessage = $"Loading {matcapItems.Count} matcaps...";
+            _statusMessage = $"Loading {_matcapItems.Count} matcaps...";
             
             // Wait for all previews to load
-            while (loadedPreviewCount < matcapItems.Count)
+            while (_loadedPreviewCount < _matcapItems.Count)
             {
                 yield return null;
             }
             
-            isLoading = false;
-            statusMessage = $"Loaded {matcapItems.Count} matcaps";
+            _isLoading = false;
+            _statusMessage = $"Loaded {_matcapItems.Count} matcaps";
         }
         
         private IEnumerator LoadFromGitHubAPI()
@@ -986,7 +1210,7 @@ namespace SGE.Editor.MatcapLibrary
             
             foreach (string dir in directories)
             {
-                string apiUrl = GITHUB_API_BASE + dir;
+                string apiUrl = GitHubApiBase + dir;
                 using (UnityWebRequest request = UnityWebRequest.Get(apiUrl))
                 {
                     request.timeout = 15;
@@ -1037,13 +1261,13 @@ namespace SGE.Editor.MatcapLibrary
                     fileName = fileName,
                     isDownloaded = CheckIfDownloaded(fileName)
                 };
-                matcapItems.Add(item);
+                _matcapItems.Add(item);
             }
         }
         
         private IEnumerator LoadFromGitHubPage()
         {
-            using (UnityWebRequest request = UnityWebRequest.Get(GITHUB_PAGE_URL))
+            using (UnityWebRequest request = UnityWebRequest.Get(GitHubPageUrl))
             {
                 request.timeout = 15;
                 request.SetRequestHeader("User-Agent", "Unity-MatcapLibrary");
@@ -1087,7 +1311,7 @@ namespace SGE.Editor.MatcapLibrary
                             fileName = fileName,
                             isDownloaded = CheckIfDownloaded(fileName)
                         };
-                        matcapItems.Add(item);
+                        _matcapItems.Add(item);
                     }
                 }
                 else
@@ -1106,14 +1330,14 @@ namespace SGE.Editor.MatcapLibrary
             if (cachedTexture != null)
             {
                 item.preview = cachedTexture;
-                previewCache[item.fileName] = item.preview;
-                loadedPreviewCount++;
+                _previewCache[item.fileName] = item.preview;
+                _loadedPreviewCount++;
                 Repaint();
                 yield break; // Exit early if cache hit
             }
             
             // If not in cache, download from GitHub
-            string url = GITHUB_RAW_BASE + "preview/" + item.fileName;
+            string url = GitHubRawBase + "preview/" + item.fileName;
             
             using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(url))
             {
@@ -1123,7 +1347,7 @@ namespace SGE.Editor.MatcapLibrary
                 if (request.result == UnityWebRequest.Result.Success)
                 {
                     item.preview = DownloadHandlerTexture.GetContent(request);
-                    previewCache[item.fileName] = item.preview;
+                    _previewCache[item.fileName] = item.preview;
                     
                     // Save to cache for future use
                     SaveToCache(item.fileName, item.preview);
@@ -1133,7 +1357,7 @@ namespace SGE.Editor.MatcapLibrary
                     Debug.LogWarning($"Failed to load preview for {item.name}: {request.error}");
                 }
                 
-                loadedPreviewCount++;
+                _loadedPreviewCount++;
                 Repaint();
             }
         }
@@ -1146,16 +1370,16 @@ namespace SGE.Editor.MatcapLibrary
         private IEnumerator DownloadMatcapCoroutine(MatcapItem item)
         {
             item.isDownloading = true;
-            statusMessage = $"Downloading {item.name}...";
+            _statusMessage = $"Downloading {item.name}...";
             Repaint();
             
             // Clean filename - remove any preview suffix that might have been added
             string cleanFileName = CleanFileName(item.fileName);
             
             // Always download at 1024px resolution
-            Debug.Log($"🔍 다운로드 시작 - 고정 해상도: {FIXED_RESOLUTION}px");
+            Debug.Log($"다운로드 시작 - 고정 해상도: {FixedResolution}px");
             
-            string url = $"{GITHUB_RAW_BASE}{FIXED_RESOLUTION}/{cleanFileName}";
+            string url = $"{GitHubRawBase}{FixedResolution}/{cleanFileName}";
             Debug.Log($"다운로드 URL: {url}");
                 
             using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(url))
@@ -1171,23 +1395,23 @@ namespace SGE.Editor.MatcapLibrary
                         Texture2D texture = DownloadHandlerTexture.GetContent(request);
                         if (texture != null)
                         {
-                            Debug.Log($"✅ 다운로드 성공: {item.name} (1024px, 텍스처: {texture.width}x{texture.height})");
+                            Debug.Log($"다운로드 성공: {item.name} (1024px, 텍스처: {texture.width}x{texture.height})");
                             
                             // Save with Matcap_ prefix
                             SaveTexture(texture, cleanFileName);
                             item.isDownloaded = true;
-                            statusMessage = $"Downloaded {item.name} (1024px)";
+                            _statusMessage = $"Downloaded {item.name} (1024px)";
                         }
                         else
                         {
                             Debug.LogError($"텍스처 변환 실패: {item.name}");
-                            statusMessage = $"Failed to process {item.name}";
+                            _statusMessage = $"Failed to process {item.name}";
                         }
                     }
                     catch (Exception e)
                     {
                         Debug.LogError($"다운로드 처리 중 오류: {item.name} - {e.Message}");
-                        statusMessage = $"Error processing {item.name}";
+                        _statusMessage = $"Error processing {item.name}";
                     }
                 }
                 else
@@ -1196,7 +1420,7 @@ namespace SGE.Editor.MatcapLibrary
                     Debug.LogError($"URL: {url}");
                     Debug.LogError($"오류: {request.error}");
                     Debug.LogError($"응답 코드: {request.responseCode}");
-                    statusMessage = $"Failed to download {item.name} (Code: {request.responseCode})";
+                    _statusMessage = $"Failed to download {item.name} (Code: {request.responseCode})";
                     
                     // Try alternative file naming patterns as last resort
                     yield return TryAlternativeDownload(item, cleanFileName);
@@ -1207,6 +1431,9 @@ namespace SGE.Editor.MatcapLibrary
             Repaint();
         }
         
+        /// <summary>
+        /// 다운로드되지 않은 모든 MatCap을 일괄 다운로드합니다.
+        /// </summary>
         public void DownloadAllMatcaps()
         {
             EditorCoroutine.Start(DownloadAllMatcapsCoroutine());
@@ -1214,16 +1441,16 @@ namespace SGE.Editor.MatcapLibrary
         
         private IEnumerator DownloadAllMatcapsCoroutine()
         {
-            List<MatcapItem> itemsToDownload = matcapItems.Where(item => !item.isDownloaded).ToList();
+            List<MatcapItem> itemsToDownload = _matcapItems.Where(item => !item.isDownloaded).ToList();
             
             for (int i = 0; i < itemsToDownload.Count; i++)
             {
                 var item = itemsToDownload[i];
-                statusMessage = $"Downloading {i + 1}/{itemsToDownload.Count}: {item.name}";
+                _statusMessage = $"Downloading {i + 1}/{itemsToDownload.Count}: {item.name}";
                 yield return DownloadMatcapCoroutine(item);
             }
             
-            statusMessage = $"Downloaded all matcaps";
+            _statusMessage = $"Downloaded all matcaps";
         }
         
         private void SaveTexture(Texture2D texture, string fileName)
@@ -1236,10 +1463,10 @@ namespace SGE.Editor.MatcapLibrary
             try
             {
                 // Ensure download directory exists
-                if (!Directory.Exists(downloadPath))
+                if (!Directory.Exists(DownloadPath))
                 {
-                    Directory.CreateDirectory(downloadPath);
-                    Debug.Log($"Created directory: {downloadPath}");
+                    Directory.CreateDirectory(DownloadPath);
+                    Debug.Log($"Created directory: {DownloadPath}");
                 }
                 
                 // Create filename with Matcap_ prefix
@@ -1248,7 +1475,7 @@ namespace SGE.Editor.MatcapLibrary
                 // Make sure the filename is valid for the file system
                 safeFileName = Path.GetFileName(safeFileName); // Remove any path separators
                 
-                string fullPath = Path.Combine(downloadPath, safeFileName);
+                string fullPath = Path.Combine(DownloadPath, safeFileName);
                 
                 // Check if file already exists
                 if (File.Exists(fullPath))
@@ -1301,7 +1528,7 @@ namespace SGE.Editor.MatcapLibrary
             
             foreach (string altName in alternativeNames)
             {
-                string url = $"{GITHUB_RAW_BASE}{FIXED_RESOLUTION}/{altName}";
+                string url = $"{GitHubRawBase}{FixedResolution}/{altName}";
                 Debug.Log($"대체 파일명 시도: {url}");
                 
                 using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(url))
@@ -1320,7 +1547,7 @@ namespace SGE.Editor.MatcapLibrary
                                 Debug.Log($"대체 다운로드 성공: {item.name} ({altName}, 1024px)");
                                 SaveTexture(texture, altName);
                                 item.isDownloaded = true;
-                                statusMessage = $"Downloaded {item.name} (alternative naming, 1024px)";
+                                _statusMessage = $"Downloaded {item.name} (alternative naming, 1024px)";
                                 yield break; // Success, exit
                             }
                         }
@@ -1335,7 +1562,7 @@ namespace SGE.Editor.MatcapLibrary
             }
             
             Debug.LogError($"모든 대체 방법 실패: {item.name}");
-            statusMessage = $"All download attempts failed for {item.name}";
+            _statusMessage = $"All download attempts failed for {item.name}";
         }
         
         private string[] GenerateAlternativeFileNames(string fileName)
@@ -1388,20 +1615,20 @@ namespace SGE.Editor.MatcapLibrary
         private bool CheckIfDownloaded(string fileName)
         {
             string cleanFileName = CleanFileName(fileName);
-            string fullPath = Path.Combine(downloadPath, $"Matcap_{cleanFileName}");
+            string fullPath = Path.Combine(DownloadPath, $"Matcap_{cleanFileName}");
             return File.Exists(fullPath);
         }
         
         private void FilterMatcaps()
         {
-            if (string.IsNullOrEmpty(searchFilter))
+            if (string.IsNullOrEmpty(_searchFilter))
             {
-                filteredItems = new List<MatcapItem>(matcapItems);
+                _filteredItems = new List<MatcapItem>(_matcapItems);
             }
             else
             {
-                filteredItems = matcapItems.Where(item => 
-                    item.name.ToLower().Contains(searchFilter.ToLower())).ToList();
+                _filteredItems = _matcapItems.Where(item => 
+                    item.name.ToLower().Contains(_searchFilter.ToLower())).ToList();
             }
             Repaint();
         }
@@ -1455,6 +1682,10 @@ namespace SGE.Editor.MatcapLibrary
             return true;
         }
         
+        /// <summary>
+        /// GitHub 연결 상태를 테스트합니다.
+        /// API, 페이지, Raw 파일 다운로드를 모두 확인합니다.
+        /// </summary>
         public void TestGitHubConnection()
         {
             EditorCoroutine.Start(TestConnectionCoroutine());
@@ -1462,13 +1693,13 @@ namespace SGE.Editor.MatcapLibrary
         
         private IEnumerator TestConnectionCoroutine()
         {
-            statusMessage = "Testing GitHub connection...";
+            _statusMessage = "Testing GitHub connection...";
             
             // Test 1: GitHub API
             Debug.Log("=== GitHub Connection Test ===");
-            Debug.Log($"Testing GitHub API: {GITHUB_API_BASE}preview");
+            Debug.Log($"Testing GitHub API: {GitHubApiBase}preview");
             
-            using (UnityWebRequest request = UnityWebRequest.Get(GITHUB_API_BASE + "preview"))
+            using (UnityWebRequest request = UnityWebRequest.Get(GitHubApiBase + "preview"))
             {
                 request.timeout = 10;
                 request.SetRequestHeader("User-Agent", "Unity-MatcapLibrary-Test");
@@ -1476,7 +1707,7 @@ namespace SGE.Editor.MatcapLibrary
                 
                 if (request.result == UnityWebRequest.Result.Success)
                 {
-                    Debug.Log($"✅ GitHub API 연결 성공 (응답 크기: {request.downloadHandler.data.Length} bytes)");
+                    Debug.Log($"GitHub API 연결 성공 (응답 크기: {request.downloadHandler.data.Length} bytes)");
                     Debug.Log($"응답 내용 (일부): {request.downloadHandler.text.Substring(0, Mathf.Min(200, request.downloadHandler.text.Length))}...");
                     
                     // Parse and count files
@@ -1489,7 +1720,7 @@ namespace SGE.Editor.MatcapLibrary
                 }
                 else
                 {
-                    Debug.LogError($"❌ GitHub API 연결 실패: {request.error}");
+                    Debug.LogError($"GitHub API 연결 실패: {request.error}");
                     Debug.LogError($"응답 코드: {request.responseCode}");
                 }
             }
@@ -1497,9 +1728,9 @@ namespace SGE.Editor.MatcapLibrary
             yield return null;
             
             // Test 2: GitHub Page
-            Debug.Log($"Testing GitHub Page: {GITHUB_PAGE_URL}");
+            Debug.Log($"Testing GitHub Page: {GitHubPageUrl}");
             
-            using (UnityWebRequest request = UnityWebRequest.Get(GITHUB_PAGE_URL))
+            using (UnityWebRequest request = UnityWebRequest.Get(GitHubPageUrl))
             {
                 request.timeout = 10;
                 request.SetRequestHeader("User-Agent", "Unity-MatcapLibrary-Test");
@@ -1507,7 +1738,7 @@ namespace SGE.Editor.MatcapLibrary
                 
                 if (request.result == UnityWebRequest.Result.Success)
                 {
-                    Debug.Log($"✅ GitHub 페이지 연결 성공 (HTML 크기: {request.downloadHandler.data.Length} bytes)");
+                    Debug.Log($"GitHub 페이지 연결 성공 (HTML 크기: {request.downloadHandler.data.Length} bytes)");
                     
                     // Test regex patterns
                     string html = request.downloadHandler.text;
@@ -1526,7 +1757,7 @@ namespace SGE.Editor.MatcapLibrary
                 }
                 else
                 {
-                    Debug.LogError($"❌ GitHub 페이지 연결 실패: {request.error}");
+                    Debug.LogError($"GitHub 페이지 연결 실패: {request.error}");
                     Debug.LogError($"응답 코드: {request.responseCode}");
                 }
             }
@@ -1535,7 +1766,7 @@ namespace SGE.Editor.MatcapLibrary
             
             // Test 3: Raw file download
             string testFileName = "1B1B1B1B_999999_575757_747474.png"; // Use a common matcap for testing
-            string testUrl = GITHUB_RAW_BASE + "preview/" + testFileName;
+            string testUrl = GitHubRawBase + "preview/" + testFileName;
             Debug.Log($"Testing raw file download: {testUrl}");
             
             using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(testUrl))
@@ -1546,44 +1777,44 @@ namespace SGE.Editor.MatcapLibrary
                 if (request.result == UnityWebRequest.Result.Success)
                 {
                     Texture2D texture = DownloadHandlerTexture.GetContent(request);
-                    Debug.Log($"✅ Raw 파일 다운로드 성공 (텍스처 크기: {texture.width}x{texture.height})");
+                    Debug.Log($"Raw 파일 다운로드 성공 (텍스처 크기: {texture.width}x{texture.height})");
                 }
                 else
                 {
-                    Debug.LogError($"❌ Raw 파일 다운로드 실패: {request.error}");
+                    Debug.LogError($"Raw 파일 다운로드 실패: {request.error}");
                     Debug.LogError($"응답 코드: {request.responseCode}");
                 }
             }
             
-            statusMessage = "Connection test completed. Check Console for results.";
+            _statusMessage = "Connection test completed. Check Console for results.";
             Debug.Log("=== Connection Test Complete ===");
         }
         
         // Helper Methods
         private List<MatcapItem> GetSortedAndFilteredItems()
         {
-            List<MatcapItem> items = string.IsNullOrEmpty(searchFilter) ? 
-                new List<MatcapItem>(matcapItems) : 
-                new List<MatcapItem>(filteredItems);
+            List<MatcapItem> items = string.IsNullOrEmpty(_searchFilter) ? 
+                new List<MatcapItem>(_matcapItems) : 
+                new List<MatcapItem>(_filteredItems);
             
             // Apply sorting
-            switch (currentSortMode)
+            switch (_currentSortMode)
             {
                 case SortMode.Name:
-                    items.Sort((a, b) => sortAscending ? 
+                    items.Sort((a, b) => _sortAscending ? 
                         string.Compare(a.name, b.name, StringComparison.OrdinalIgnoreCase) :
                         string.Compare(b.name, a.name, StringComparison.OrdinalIgnoreCase));
                     break;
                     
                 case SortMode.Downloaded:
-                    items.Sort((a, b) => sortAscending ?
+                    items.Sort((a, b) => _sortAscending ?
                         a.isDownloaded.CompareTo(b.isDownloaded) :
                         b.isDownloaded.CompareTo(a.isDownloaded));
                     break;
                     
                 case SortMode.Size:
                     // Sort by file size (approximate based on name length for now)
-                    items.Sort((a, b) => sortAscending ?
+                    items.Sort((a, b) => _sortAscending ?
                         a.fileName.Length.CompareTo(b.fileName.Length) :
                         b.fileName.Length.CompareTo(a.fileName.Length));
                     break;
@@ -1626,7 +1857,7 @@ namespace SGE.Editor.MatcapLibrary
             menu.AddSeparator("");
             menu.AddItem(new GUIContent("Copy Name"), false, () => EditorGUIUtility.systemCopyBuffer = item.name);
             menu.AddItem(new GUIContent("Copy URL"), false, () => 
-                EditorGUIUtility.systemCopyBuffer = $"{GITHUB_RAW_BASE}{FIXED_RESOLUTION}/{item.fileName}");
+                EditorGUIUtility.systemCopyBuffer = $"{GitHubRawBase}{FixedResolution}/{item.fileName}");
             
             menu.ShowAsContext();
         }
@@ -1634,7 +1865,7 @@ namespace SGE.Editor.MatcapLibrary
         private void ShowInProject(MatcapItem item)
         {
             string cleanFileName = CleanFileName(item.fileName);
-            string path = Path.Combine(downloadPath, $"Matcap_{cleanFileName}");
+            string path = Path.Combine(DownloadPath, $"Matcap_{cleanFileName}");
             UnityEngine.Object asset = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
             if (asset != null)
             {
@@ -1646,7 +1877,7 @@ namespace SGE.Editor.MatcapLibrary
         private void CreateMaterialForItem(MatcapItem item)
         {
             string cleanFileName = CleanFileName(item.fileName);
-            string texturePath = Path.Combine(downloadPath, $"Matcap_{cleanFileName}");
+            string texturePath = Path.Combine(DownloadPath, $"Matcap_{cleanFileName}");
             Texture2D texture = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
             
             if (texture == null)
@@ -1666,48 +1897,53 @@ namespace SGE.Editor.MatcapLibrary
                 Material material = new Material(matcapShader);
                 material.mainTexture = texture;
                 
-                string materialPath = Path.Combine(downloadPath, $"Mat_{item.name}.mat");
+                string materialPath = Path.Combine(DownloadPath, $"Mat_{item.name}.mat");
                 AssetDatabase.CreateAsset(material, materialPath);
                 AssetDatabase.SaveAssets();
                 
                 Selection.activeObject = material;
                 EditorGUIUtility.PingObject(material);
                 
-                statusMessage = $"Created material for {item.name}";
+                _statusMessage = $"Created material for {item.name}";
             }
         }
         
+        /// <summary>
+        /// 도움말 다이얼로그를 표시합니다.
+        /// 기능 설명, 단축키, 사용법 등을 안내합니다.
+        /// </summary>
         public void ShowHelp()
         {
             string helpText = @"Matcap Library Help
 
-🎨 OVERVIEW
+OVERVIEW
 Professional matcap browser and downloader for Unity projects.
 
-🔧 TOOLBAR ACTIONS
-⊞ Grid View - Show matcaps in a grid layout
-☰ List View - Show matcaps in a detailed list
-🔄 Refresh - Reload matcap list from GitHub
-🔗 Test Connection - Verify GitHub connectivity
-💾 Cache Info - Show cache information and stats
-⬇ Download All - Download all available matcaps
+TOOLBAR ACTIONS
+Grid View - Show matcaps in a grid layout
+List View - Show matcaps in a detailed list
+Refresh - Reload matcap list from GitHub
+Test - Verify GitHub connectivity
+Cache - Show cache information and stats
+Download All - Download all available matcaps
 
-🖱️ INTERACTIONS
+INTERACTIONS
 • Left Click - Select matcap
 • Double Click - Download matcap
 • Right Click - Show context menu
 • Search - Filter matcaps by name
 
-⚙️ SETTINGS
+SETTINGS
 • Download Path - Where to save matcaps
-• Resolution - Image quality (256/512/1024)
+• Resolution - Image quality (1024px fixed)
 • Thumbnail Size - Preview size in grid view
 • Cache Management - View and clear cached previews
 
-💾 CACHE SYSTEM
-Preview images are automatically cached in Library/MatcapCache for faster loading. Cache expires after 7 days and can be manually cleared from settings.
+CACHE SYSTEM
+Preview images are automatically cached in Library/MatcapCache for faster loading. 
+Cache expires after 7 days and can be manually cleared from settings.
 
-⌨️ KEYBOARD SHORTCUTS
+KEYBOARD SHORTCUTS
 • F5 - Refresh matcap list
 • Esc - Clear selection/close panels
 • Tab - Switch view mode
@@ -1734,13 +1970,13 @@ Source: github.com/nidorx/matcaps";
                         break;
                         
                     case KeyCode.Escape:
-                        selectedItem = null;
-                        showFilters = false;
+                        _selectedItem = null;
+                        _showFilters = false;
                         e.Use();
                         break;
                         
                     case KeyCode.Tab:
-                        currentViewMode = currentViewMode == ViewMode.Grid ? ViewMode.List : ViewMode.Grid;
+                        _currentViewMode = _currentViewMode == ViewMode.Grid ? ViewMode.List : ViewMode.Grid;
                         e.Use();
                         break;
                 }
@@ -1752,7 +1988,7 @@ Source: github.com/nidorx/matcaps";
         // Cache Management Methods
         private void InitializeCache()
         {
-            if (cacheInitialized) return;
+            if (_cacheInitialized) return;
             
             try
             {
@@ -1767,20 +2003,20 @@ Source: github.com/nidorx/matcaps";
                 LoadCacheIndex();
                 
                 // Clean expired entries
-                if (cacheIndex != null)
+                if (CacheIndex != null)
                 {
-                    cacheIndex.CleanExpiredEntries();
+                    CacheIndex.CleanExpiredEntries();
                     SaveCacheIndex();
                 }
                 
-                cacheInitialized = true;
-                Debug.Log($"Matcap cache initialized. Cached items: {cacheIndex?.entries.Count ?? 0}");
+                _cacheInitialized = true;
+                Debug.Log($"Matcap cache initialized. Cached items: {CacheIndex?.entries.Count ?? 0}");
             }
             catch (Exception e)
             {
                 Debug.LogError($"Failed to initialize matcap cache: {e.Message}");
-                cacheIndex = new CacheIndex();
-                cacheInitialized = true;
+                CacheIndex = new CacheIndex();
+                _cacheInitialized = true;
             }
         }
         
@@ -1791,32 +2027,35 @@ Source: github.com/nidorx/matcaps";
                 try
                 {
                     string json = File.ReadAllText(CacheIndexPath);
-                    cacheIndex = JsonUtility.FromJson<CacheIndex>(json);
+                    CacheIndex = JsonUtility.FromJson<CacheIndex>(json);
                     
-                    if (cacheIndex == null)
+                    if (CacheIndex == null)
                     {
-                        cacheIndex = new CacheIndex();
+                        CacheIndex = new CacheIndex();
                     }
                 }
                 catch (Exception e)
                 {
                     Debug.LogWarning($"Failed to load cache index: {e.Message}. Creating new index.");
-                    cacheIndex = new CacheIndex();
+                    CacheIndex = new CacheIndex();
                 }
             }
             else
             {
-                cacheIndex = new CacheIndex();
+                CacheIndex = new CacheIndex();
             }
         }
         
+        /// <summary>
+        /// 캐시 인덱스를 디스크에 저장합니다.
+        /// </summary>
         public void SaveCacheIndex()
         {
-            if (cacheIndex == null) return;
+            if (CacheIndex == null) return;
             
             try
             {
-                string json = JsonUtility.ToJson(cacheIndex, true);
+                string json = JsonUtility.ToJson(CacheIndex, true);
                 File.WriteAllText(CacheIndexPath, json);
             }
             catch (Exception e)
@@ -1833,6 +2072,12 @@ Source: github.com/nidorx/matcaps";
             return $"preview_{hash}{extension}";
         }
         
+        /// <summary>
+        /// 캐시 엔트리가 유효한지 확인합니다.
+        /// 파일 존재 여부와 만료 시간을 체크합니다.
+        /// </summary>
+        /// <param name="entry">확인할 캐시 엔트리</param>
+        /// <returns>캐시가 유효하면 true</returns>
         public bool IsCacheValid(CacheEntry entry)
         {
             if (entry == null || !entry.isValid)
@@ -1842,8 +2087,7 @@ Source: github.com/nidorx/matcaps";
             if (!File.Exists(cachePath))
                 return false;
                 
-            // Check if cache is expired
-            long expireTime = DateTimeOffset.UtcNow.AddDays(-CACHE_EXPIRY_DAYS).ToUnixTimeSeconds();
+            long expireTime = DateTimeOffset.UtcNow.AddDays(-CacheExpiryDays).ToUnixTimeSeconds();
             if (entry.cacheTime < expireTime)
                 return false;
                 
@@ -1852,7 +2096,7 @@ Source: github.com/nidorx/matcaps";
         
         private Texture2D LoadFromCache(string fileName)
         {
-            var entry = cacheIndex?.GetEntry(fileName);
+            var entry = CacheIndex?.GetEntry(fileName);
             if (!IsCacheValid(entry))
                 return null;
                 
@@ -1881,7 +2125,7 @@ Source: github.com/nidorx/matcaps";
         
         private void SaveToCache(string fileName, Texture2D texture)
         {
-            if (texture == null || cacheIndex == null) return;
+            if (texture == null || CacheIndex == null) return;
             
             try
             {
@@ -1891,7 +2135,7 @@ Source: github.com/nidorx/matcaps";
                 byte[] pngData = texture.EncodeToPNG();
                 File.WriteAllBytes(cachePath, pngData);
                 
-                cacheIndex.AddOrUpdateEntry(fileName, cacheFileName, pngData.Length);
+                CacheIndex.AddOrUpdateEntry(fileName, cacheFileName, pngData.Length);
                 SaveCacheIndex();
                 
                 Debug.Log($"Cached preview for {fileName} ({pngData.Length} bytes)");
@@ -1902,6 +2146,10 @@ Source: github.com/nidorx/matcaps";
             }
         }
         
+        /// <summary>
+        /// 모든 캐시 데이터를 삭제합니다.
+        /// 디스크의 캐시 파일과 메모리의 프리뷰 이미지를 모두 제거합니다.
+        /// </summary>
         public void ClearCache()
         {
             try
@@ -1912,26 +2160,24 @@ Source: github.com/nidorx/matcaps";
                     Directory.CreateDirectory(CacheDirectory);
                 }
                 
-                cacheIndex = new CacheIndex();
+                CacheIndex = new CacheIndex();
                 SaveCacheIndex();
                 
-                // Clear preview cache in memory
-                foreach (var texture in previewCache.Values)
+                foreach (var texture in _previewCache.Values)
                 {
                     if (texture != null)
                     {
                         DestroyImmediate(texture);
                     }
                 }
-                previewCache.Clear();
+                _previewCache.Clear();
                 
-                // Reset preview references
-                foreach (var item in matcapItems)
+                foreach (var item in _matcapItems)
                 {
                     item.preview = null;
                 }
                 
-                statusMessage = "Cache cleared successfully";
+                _statusMessage = "Cache cleared successfully";
                 Debug.Log("Matcap cache cleared");
                 
                 Repaint();
@@ -1939,43 +2185,52 @@ Source: github.com/nidorx/matcaps";
             catch (Exception e)
             {
                 Debug.LogError($"Failed to clear cache: {e.Message}");
-                statusMessage = "Failed to clear cache";
+                _statusMessage = "Failed to clear cache";
             }
         }
         
+        /// <summary>
+        /// 캐시 정보 다이얼로그를 표시합니다.
+        /// 캐시 크기, 항목 수, 만료 정보 등을 보여줍니다.
+        /// </summary>
         public void ShowCacheInfo()
         {
-            if (cacheIndex == null)
+            if (CacheIndex == null)
             {
                 EditorUtility.DisplayDialog("Cache Information", "Cache not initialized.", "OK");
                 return;
             }
             
-            int validEntries = cacheIndex.entries.Count(e => IsCacheValid(e));
-            int expiredEntries = cacheIndex.entries.Count - validEntries;
-            long totalSize = cacheIndex.entries.Sum(e => e.fileSize);
-            long validSize = cacheIndex.entries.Where(e => IsCacheValid(e)).Sum(e => e.fileSize);
+            int validEntries = CacheIndex.entries.Count(e => IsCacheValid(e));
+            int expiredEntries = CacheIndex.entries.Count - validEntries;
+            long totalSize = CacheIndex.entries.Sum(e => e.fileSize);
+            long validSize = CacheIndex.entries.Where(e => IsCacheValid(e)).Sum(e => e.fileSize);
             
-            string lastUpdate = cacheIndex.lastUpdate > 0 ? 
-                DateTimeOffset.FromUnixTimeSeconds(cacheIndex.lastUpdate).ToString("yyyy-MM-dd HH:mm:ss") : 
+            string lastUpdate = CacheIndex.lastUpdate > 0 ? 
+                DateTimeOffset.FromUnixTimeSeconds(CacheIndex.lastUpdate).ToString("yyyy-MM-dd HH:mm:ss") : 
                 "Never";
             
             string info = $@"Matcap Cache Information
 
-📁 Cache Location: {CacheDirectory}
-📊 Total Entries: {cacheIndex.entries.Count}
-✅ Valid Entries: {validEntries}
-❌ Expired Entries: {expiredEntries}
-💾 Total Size: {FormatFileSize(totalSize)}
-✅ Valid Size: {FormatFileSize(validSize)}
-🕒 Last Updated: {lastUpdate}
-⏰ Cache Expiry: {CACHE_EXPIRY_DAYS} days
+Cache Location: {CacheDirectory}
+Total Entries: {CacheIndex.entries.Count}
+Valid Entries: {validEntries}
+Expired Entries: {expiredEntries}
+Total Size: {FormatFileSize(totalSize)}
+Valid Size: {FormatFileSize(validSize)}
+Last Updated: {lastUpdate}
+Cache Expiry: {CacheExpiryDays} days
 
 The cache automatically stores preview images to improve loading speed on subsequent uses.";
             
             EditorUtility.DisplayDialog("Cache Information", info, "OK");
         }
         
+        /// <summary>
+        /// 바이트 크기를 사람이 읽기 쉬운 형식으로 변환합니다.
+        /// </summary>
+        /// <param name="bytes">바이트 크기</param>
+        /// <returns>포맷팅된 파일 크기 문자열 (예: "1.5 MB")</returns>
         public string FormatFileSize(long bytes)
         {
             if (bytes < 1024)
@@ -1988,9 +2243,12 @@ The cache automatically stores preview images to improve loading speed on subseq
                 return $"{bytes / (1024.0 * 1024.0 * 1024.0):F1} GB";
         }
         
+        /// <summary>
+        /// 새로운 MatCap Material을 생성합니다.
+        /// MatCap 셰이더를 찾아 새로운 Material 에셋을 만듭니다.
+        /// </summary>
         public void CreateMatcapMaterial()
         {
-            // Create a simple matcap shader if not exists
             Shader matcapShader = Shader.Find("MatCap/Lit");
             
             if (matcapShader == null)
@@ -2000,28 +2258,37 @@ The cache automatically stores preview images to improve loading speed on subseq
             }
             
             Material material = new Material(matcapShader);
-            string materialPath = Path.Combine(downloadPath, "NewMatcapMaterial.mat");
+            string materialPath = Path.Combine(DownloadPath, "NewMatcapMaterial.mat");
             AssetDatabase.CreateAsset(material, materialPath);
             AssetDatabase.SaveAssets();
             
             Selection.activeObject = material;
             EditorGUIUtility.PingObject(material);
             
-            statusMessage = "Created new Matcap material";
+            _statusMessage = "Created new Matcap material";
         }
+        
+        #endregion
     }
     
-    // Settings Window
+    #region 설정 윈도우
+    
+    /// <summary>
+    /// MatCap Library 설정 윈도우
+    /// 다운로드 경로, 캐시 관리, 고급 설정 등을 제공합니다.
+    /// </summary>
     public class MatcapLibrarySettings : EditorWindow
     {
         private MatcapLibraryWindow parentWindow;
-        private Vector2 scrollPosition;
+        private Vector2 _scrollPosition;
         
-        // Settings data
-        private string downloadPath;
+        private string DownloadPath;
         private int selectedResolution;
         private int[] resolutionOptions = { 256, 512, 1024 };
         
+        /// <summary>
+        /// Unity 메뉴에서 설정 윈도우를 엽니다.
+        /// </summary>
         [MenuItem("Window/Matcap Library Settings")]
         public static void ShowWindowFromMenu()
         {
@@ -2037,6 +2304,10 @@ The cache automatically stores preview images to improve loading speed on subseq
             ShowWindow(mainWindow);
         }
         
+        /// <summary>
+        /// 부모 윈도우를 지정하여 설정 윈도우를 엽니다.
+        /// </summary>
+        /// <param name="parent">부모 MatcapLibraryWindow</param>
         public static void ShowWindow(MatcapLibraryWindow parent)
         {
             var window = GetWindow<MatcapLibrarySettings>("Matcap Settings");
@@ -2044,10 +2315,8 @@ The cache automatically stores preview images to improve loading speed on subseq
             window.minSize = new Vector2(400, 500);
             window.maxSize = new Vector2(600, 800);
             
-            // Load current settings from parent
             window.LoadSettingsFromParent();
             
-            // Center the window
             var main = EditorGUIUtility.GetMainWindowPosition();
             var pos = window.position;
             pos.x = main.x + (main.width - pos.width) * 0.5f;
@@ -2059,7 +2328,7 @@ The cache automatically stores preview images to improve loading speed on subseq
         {
             if (parentWindow != null)
             {
-                downloadPath = parentWindow.downloadPath;
+                DownloadPath = parentWindow.DownloadPath;
             }
         }
         
@@ -2067,14 +2336,14 @@ The cache automatically stores preview images to improve loading speed on subseq
         {
             if (parentWindow != null)
             {
-                Debug.Log($"🔄 ApplySettingsToParent - 설정 적용");
-                parentWindow.downloadPath = downloadPath;
-                Debug.Log($"🔄 ApplySettingsToParent - 설정 적용 완료");
+                Debug.Log($"ApplySettingsToParent - 설정 적용");
+                parentWindow.DownloadPath = DownloadPath;
+                Debug.Log($"ApplySettingsToParent - 설정 적용 완료");
                 parentWindow.Repaint();
             }
             else
             {
-                Debug.LogWarning("⚠️ parentWindow가 null입니다!");
+                Debug.LogWarning("parentWindow가 null입니다!");
             }
         }
         
@@ -2082,7 +2351,7 @@ The cache automatically stores preview images to improve loading speed on subseq
         {
             DrawHeader();
             
-            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+            _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
             {
                 DrawGeneralSettings();
                 GUILayout.Space(10);
@@ -2114,7 +2383,7 @@ The cache automatically stores preview images to improve loading speed on subseq
                     GUIStyle titleStyle = new GUIStyle(EditorStyles.boldLabel);
                     titleStyle.fontSize = 18;
                     titleStyle.normal.textColor = Color.white;
-                    GUILayout.Label("⚙️ Matcap Library Settings", titleStyle);
+                    GUILayout.Label("Matcap Library Settings", titleStyle);
                     
                     GUILayout.FlexibleSpace();
                 }
@@ -2138,23 +2407,23 @@ The cache automatically stores preview images to improve loading speed on subseq
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
-                GUILayout.Label("📁 General Settings", EditorStyles.boldLabel);
+                GUILayout.Label("General Settings", EditorStyles.boldLabel);
                 GUILayout.Space(5);
                 
                 // Download path
                 EditorGUILayout.BeginHorizontal();
                 {
                     EditorGUILayout.LabelField("Download Path:", GUILayout.Width(120));
-                    downloadPath = EditorGUILayout.TextField(downloadPath);
+                    DownloadPath = EditorGUILayout.TextField(DownloadPath);
                     
                     if (GUILayout.Button("Browse", GUILayout.Width(60)))
                     {
-                        string path = EditorUtility.SaveFolderPanel("Select Download Folder", downloadPath, "");
+                        string path = EditorUtility.SaveFolderPanel("Select Download Folder", DownloadPath, "");
                         if (!string.IsNullOrEmpty(path))
                         {
                             if (path.StartsWith(Application.dataPath))
                             {
-                                downloadPath = "Assets" + path.Substring(Application.dataPath.Length);
+                                DownloadPath = "Assets" + path.Substring(Application.dataPath.Length);
                                 ApplySettingsToParent();
                             }
                             else
@@ -2188,16 +2457,16 @@ The cache automatically stores preview images to improve loading speed on subseq
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
-                GUILayout.Label("💾 Cache Settings", EditorStyles.boldLabel);
+                GUILayout.Label("Cache Settings", EditorStyles.boldLabel);
                 GUILayout.Space(5);
                 
-                if (parentWindow?.cacheIndex != null)
+                if (parentWindow?.CacheIndex != null)
                 {
-                    var cacheIndex = parentWindow.cacheIndex;
-                    int cachedCount = cacheIndex.entries.Count;
-                    int validCount = cacheIndex.entries.Count(e => parentWindow.IsCacheValid(e));
+                    var CacheIndex = parentWindow.CacheIndex;
+                    int cachedCount = CacheIndex.entries.Count;
+                    int validCount = CacheIndex.entries.Count(e => parentWindow.IsCacheValid(e));
                     int expiredCount = cachedCount - validCount;
-                    long totalSize = cacheIndex.entries.Sum(e => e.fileSize);
+                    long totalSize = CacheIndex.entries.Sum(e => e.fileSize);
                     
                     // Cache statistics
                     EditorGUILayout.BeginHorizontal();
@@ -2233,12 +2502,12 @@ The cache automatically stores preview images to improve loading speed on subseq
                     // Cache actions
                     EditorGUILayout.BeginHorizontal();
                     {
-                        if (GUILayout.Button("📊 Show Detailed Info"))
+                        if (GUILayout.Button("Show Detailed Info"))
                         {
                             parentWindow.ShowCacheInfo();
                         }
                         
-                        if (GUILayout.Button("📁 Open Cache Folder"))
+                        if (GUILayout.Button("Open Cache Folder"))
                         {
                             EditorUtility.RevealInFinder(MatcapLibraryWindow.CacheDirectory);
                         }
@@ -2247,7 +2516,7 @@ The cache automatically stores preview images to improve loading speed on subseq
                     
                     EditorGUILayout.BeginHorizontal();
                     {
-                        if (GUILayout.Button("🗑️ Clear All Cache"))
+                        if (GUILayout.Button("Clear All Cache"))
                         {
                             if (EditorUtility.DisplayDialog("Clear Cache", 
                                 "Are you sure you want to clear all cached preview images?\n\nThis will force re-download of all previews on next use.", 
@@ -2257,7 +2526,7 @@ The cache automatically stores preview images to improve loading speed on subseq
                             }
                         }
                         
-                        if (GUILayout.Button("🧹 Clean Expired"))
+                        if (GUILayout.Button("Clean Expired"))
                         {
                             CleanExpiredCache();
                         }
@@ -2278,7 +2547,7 @@ The cache automatically stores preview images to improve loading speed on subseq
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
-                GUILayout.Label("🔧 Advanced Settings", EditorStyles.boldLabel);
+                GUILayout.Label("Advanced Settings", EditorStyles.boldLabel);
                 GUILayout.Space(5);
                 
                 // GitHub connection info
@@ -2301,12 +2570,12 @@ The cache automatically stores preview images to improve loading speed on subseq
                 // Advanced actions
                 EditorGUILayout.BeginHorizontal();
                 {
-                    if (GUILayout.Button("🔗 Test Connection"))
+                    if (GUILayout.Button("Test Connection"))
                     {
                         parentWindow?.TestGitHubConnection();
                     }
                     
-                    if (GUILayout.Button("🔄 Force Refresh"))
+                    if (GUILayout.Button("Force Refresh"))
                     {
                         parentWindow?.LoadMatcapList();
                     }
@@ -2322,17 +2591,17 @@ The cache automatically stores preview images to improve loading speed on subseq
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
-                GUILayout.Label("🛠️ Quick Actions", EditorStyles.boldLabel);
+                GUILayout.Label("Quick Actions", EditorStyles.boldLabel);
                 GUILayout.Space(5);
                 
                 EditorGUILayout.BeginHorizontal();
                 {
-                    if (GUILayout.Button("📁 Open Download Folder"))
+                    if (GUILayout.Button("Open Download Folder"))
                     {
-                        EditorUtility.RevealInFinder(downloadPath);
+                        EditorUtility.RevealInFinder(DownloadPath);
                     }
                     
-                    if (GUILayout.Button("🎨 Create Material"))
+                    if (GUILayout.Button("Create Material"))
                     {
                         parentWindow?.CreateMatcapMaterial();
                     }
@@ -2341,7 +2610,7 @@ The cache automatically stores preview images to improve loading speed on subseq
                 
                 EditorGUILayout.BeginHorizontal();
                 {
-                    if (GUILayout.Button("⬇️ Download All Matcaps"))
+                    if (GUILayout.Button("Download All Matcaps"))
                     {
                         if (EditorUtility.DisplayDialog("Download All", 
                             "This will download all available matcaps. This may take a while and use significant bandwidth.\n\nContinue?", 
@@ -2351,7 +2620,7 @@ The cache automatically stores preview images to improve loading speed on subseq
                         }
                     }
                     
-                    if (GUILayout.Button("❓ Show Help"))
+                    if (GUILayout.Button("Show Help"))
                     {
                         parentWindow?.ShowHelp();
                     }
@@ -2395,12 +2664,12 @@ The cache automatically stores preview images to improve loading speed on subseq
         
         private void CleanExpiredCache()
         {
-            if (parentWindow?.cacheIndex != null)
+            if (parentWindow?.CacheIndex != null)
             {
-                int beforeCount = parentWindow.cacheIndex.entries.Count;
-                parentWindow.cacheIndex.CleanExpiredEntries();
+                int beforeCount = parentWindow.CacheIndex.entries.Count;
+                parentWindow.CacheIndex.CleanExpiredEntries();
                 parentWindow.SaveCacheIndex();
-                int afterCount = parentWindow.cacheIndex.entries.Count;
+                int afterCount = parentWindow.CacheIndex.entries.Count;
                 int removedCount = beforeCount - afterCount;
                 
                 EditorUtility.DisplayDialog("Cache Cleaned", 
@@ -2412,12 +2681,18 @@ The cache automatically stores preview images to improve loading speed on subseq
         
         private void OnDestroy()
         {
-            // Ensure settings are applied when window closes
             ApplySettingsToParent();
         }
     }
     
-    // Editor Coroutine Helper
+    #endregion
+    
+    #region 에디터 코루틴 헬퍼
+    
+    /// <summary>
+    /// Unity 에디터에서 코루틴을 실행하기 위한 헬퍼 클래스
+    /// 에디터 업데이트 루프를 사용하여 비동기 작업을 처리합니다.
+    /// </summary>
     public class EditorCoroutine
     {
         private readonly Stack<IEnumerator> stack = new Stack<IEnumerator>();
@@ -2430,6 +2705,11 @@ The cache automatically stores preview images to improve loading speed on subseq
             stack.Push(routine);
         }
 
+        /// <summary>
+        /// 에디터 코루틴을 시작합니다.
+        /// </summary>
+        /// <param name="routine">실행할 코루틴</param>
+        /// <returns>EditorCoroutine 인스턴스</returns>
         public static EditorCoroutine Start(IEnumerator routine)
         {
             if (routine == null) throw new ArgumentNullException(nameof(routine));
@@ -2443,6 +2723,10 @@ The cache automatically stores preview images to improve loading speed on subseq
             EditorApplication.update += Update;
         }
 
+        /// <summary>
+        /// 실행 중인 에디터 코루틴을 중지합니다.
+        /// </summary>
+        /// <param name="coroutine">중지할 코루틴</param>
         public static void Stop(EditorCoroutine coroutine)
         {
             if (coroutine != null)
@@ -2460,25 +2744,25 @@ The cache automatically stores preview images to improve loading speed on subseq
             EditorApplication.update -= Update;
         }
 
+        /// <summary>
+        /// 에디터 업데이트마다 호출되어 코루틴을 진행시킵니다.
+        /// </summary>
         private void Update()
         {
             if (isDone) return;
 
-            // If waiting for AsyncOperation -> wait until completed
             if (waitingAsyncOp != null)
             {
                 if (!waitingAsyncOp.isDone) return;
-                waitingAsyncOp = null; // continue
+                waitingAsyncOp = null;
             }
 
-            // If waiting for CustomYieldInstruction -> wait until it's done
             if (waitingCustomYield != null)
             {
                 if (waitingCustomYield.keepWaiting) return;
-                waitingCustomYield = null; // continue
+                waitingCustomYield = null;
             }
 
-            // No more enumerators -> stop
             if (stack.Count == 0)
             {
                 Stop();
@@ -2515,30 +2799,30 @@ The cache automatically stores preview images to improve loading speed on subseq
                 return;
             }
 
-            // Support nested IEnumerator
+            
             if (yielded is IEnumerator nested)
             {
                 stack.Push(nested);
                 return;
             }
 
-            // Support UnityWebRequest/ResourceRequest/etc.
+            
             if (yielded is AsyncOperation asyncOp)
             {
                 waitingAsyncOp = asyncOp;
                 return;
             }
 
-            // Support CustomYieldInstruction (optional)
+            
             if (yielded is CustomYieldInstruction customYield)
             {
                 waitingCustomYield = customYield;
                 return;
             }
 
-            // Unknown yield type -> treat as one-frame wait
-            // (prevents tight loops when unexpected types are yielded)
             return;
         }
     }
+    
+    #endregion
 }

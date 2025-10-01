@@ -113,12 +113,12 @@ Unity 에디터 상단 메뉴에서 **`Window`** > **`Matcap Library`**를 선�
 #### MatCap 다운로드
 - **더블 클릭**: MatCap을 더블 클릭하여 다운로드
 - **우클릭 메뉴**: 컨텍스트 메뉴에서 "Download" 선택
-- **일괄 다운로드**: 툴바의 ⬇ 버튼으로 모든 MatCap 다운로드
+- **일괄 다운로드**: 툴바의 "Download All" 버튼으로 모든 MatCap 다운로드
 
 #### MatCap 검색
 1. 검색 바에 텍스트 입력
 2. 실시간으로 필터링된 결과 확인
-3. ✕ 버튼으로 검색 초기화
+3. "Clear" 버튼으로 검색 초기화
 
 #### Material 생성
 1. 다운로드한 MatCap을 우클릭
@@ -127,9 +127,9 @@ Unity 에디터 상단 메뉴에서 **`Window`** > **`Matcap Library`**를 선�
 
 ---
 
-## ⚙️ Settings
+## Settings
 
-**`Window`** > **`Matcap Library Settings`** 또는 메인 창의 ⚙ 버튼을 클릭하여 설정 창을 엽니다.
+**`Window`** > **`Matcap Library Settings`** 또는 메인 창의 "Settings" 버튼을 클릭하여 설정 창을 엽니다.
 
 ### 일반 설정
 - **Download Path**: MatCap 파일이 저장될 경로 (기본값: `Assets/Matcaps`)
@@ -158,16 +158,16 @@ Unity 에디터 상단 메뉴에서 **`Window`** > **`Matcap Library`**를 선�
 
 ---
 
-## 🎨 Toolbar Actions
+## Toolbar Actions
 
-| 아이콘 | 기능 | 설명 |
-|--------|------|------|
-| ⊞ | Grid View | 그리드 레이아웃으로 MatCap 표시 |
-| ☰ | List View | 상세 리스트로 MatCap 표시 |
-| 🔄 | Refresh | GitHub에서 MatCap 목록 다시 로드 |
-| 🔗 | Test Connection | GitHub 연결 상태 확인 |
-| 💾 | Cache Info | 캐시 정보 및 통계 표시 |
-| ⬇ | Download All | 사용 가능한 모든 MatCap 다운로드 |
+| 버튼 | 기능 | 설명 |
+|------|------|------|
+| Grid | Grid View | 그리드 레이아웃으로 MatCap 표시 |
+| List | List View | 상세 리스트로 MatCap 표시 |
+| Refresh | Refresh | GitHub에서 MatCap 목록 다시 로드 |
+| Test | Test Connection | GitHub 연결 상태 확인 |
+| Cache | Cache Info | 캐시 정보 및 통계 표시 |
+| Download All | Download All | 사용 가능한 모든 MatCap 다운로드 |
 
 ---
 
@@ -233,7 +233,7 @@ Assets/Matcaps/                           # 기본 다운로드 경로
 ### "Network error: Unable to connect to GitHub"
 - 인터넷 연결을 확인하세요
 - 방화벽 설정에서 Unity의 네트워크 액세스를 허용했는지 확인하세요
-- 툴바의 🔗 버튼으로 연결 테스트를 실행하세요
+- 툴바의 "Test" 버튼으로 연결 테스트를 실행하세요
 - VPN 사용 시 GitHub 접근이 가능한지 확인하세요
 
 ### 프리뷰가 로드되지 않음
@@ -274,14 +274,38 @@ MatCap 텍스처는 [nidorx/matcaps](https://github.com/nidorx/matcaps) 레포�
 
 - **GitHub Issues**: 버그 리포트 및 기능 요청
 - **Discussions**: 일반적인 질문 및 토론
+- **Email**: mazeline@mazeline.tech
+
+---
+
+## 👥 Developer & Company
+
+### Mazeline
+**Collection of Technical Explorations**
+
+Mazeline은 기술 탐구와 혁신적인 도구 개발에 전념하는 개발 팀입니다.  
+Unity 에디터 확장, 3D 그래픽스, 게임 개발 도구를 중심으로 다양한 프로젝트를 진행하고 있습니다.
+
+- **Website**: [mazeline.tech](https://mazeline.tech)
+- **Email**: mazeline@mazeline.tech
+
+### 개발자
+- **Developer**: jplee
+- **Contact**: mazeline@mazeline.tech
+
+### 주요 프로젝트
+- Matcap Library for Unity - MatCap 텍스처 브라우저 및 관리 도구
+- Unity Editor Extensions - 생산성 향상을 위한 에디터 도구 모음
+- 3D Graphics Tools - 실시간 렌더링 및 셰이더 유틸리티
 
 ---
 
 ## 🙏 Credits
 
 - **MatCap Textures**: [nidorx/matcaps](https://github.com/nidorx/matcaps)
-- **Developed by**: Mazeline - Collection of Technical Explorations
-- **Built with**: Unity Editor Extensions
+- **Developer**: jplee
+- **Company**: Mazeline - Collection of Technical Explorations
+- **Built with**: Unity Editor Extensions & C#
 
 ---
 
